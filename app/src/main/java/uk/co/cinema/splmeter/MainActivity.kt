@@ -93,7 +93,12 @@ fun Root() {
             NavigationBar {
                 TABS.forEach { tab ->
                     NavigationBarItem(
-                        selected = current?.hierarchy?.any { it.route == tab.route } == true,
+                        // A report belongs to History even when it was opened
+                        // from the record screen, or no tab looks selected
+                        // while one is plainly showing.
+                        selected = current?.hierarchy?.any { it.route == tab.route } == true ||
+                            (tab.route == "history" &&
+                                current?.route?.startsWith("report/") == true),
                         onClick = {
                             nav.navigate(tab.route) {
                                 popUpTo(nav.graph.findStartDestination().id) { saveState = true }
@@ -109,7 +114,20 @@ fun Root() {
         }
     ) { padding ->
         NavHost(nav, startDestination = "record", modifier = Modifier.padding(padding)) {
-            composable("record") { RecordScreen(onOpenReport = { nav.navigate("report/$it") }) }
+            composable("record") {
+                RecordScreen(onOpenReport = { id ->
+                    // Switch to History first, so the report is opened from the
+                    // list it belongs to. Pushing it straight onto the record
+                    // tab left it saved as that tab's state: going to History
+                    // and back to Record showed the report again.
+                    nav.navigate("history") {
+                        popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                    nav.navigate("report/$id")
+                })
+            }
             composable("history") { HistoryScreen(onOpen = { nav.navigate("report/$it") }) }
             composable("report/{id}") { backStack ->
                 ReportScreen(
