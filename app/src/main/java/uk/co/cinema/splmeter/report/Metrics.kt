@@ -182,10 +182,12 @@ class Metrics private constructor(
                 leqA = if (n == 0) -200.0 else 10.0 * log10(aSum / safeN) + offset,
                 leqC = if (n == 0) -200.0 else 10.0 * log10(cSum / safeN) + offset,
                 leqZ = if (n == 0) -200.0 else 10.0 * log10(zSum / safeN) + offset,
-                lasMax = (log.lasMax.maxOrNull() ?: -200f) + offset + fastShift,
-                lasMin = (log.lasMin.minOrNull() ?: -200f) + offset + fastShift,
-                lcsMax = (log.lcsMax.maxOrNull() ?: -200f) + offset + fastShift,
-                lcsMin = (log.lcsMin.minOrNull() ?: -200f) + offset + fastShift,
+                // NaN marks a window with no usable level; ignore those rather
+                // than letting one pin an extreme for the whole session.
+                lasMax = extreme(log.lasMax, true) + offset + fastShift,
+                lasMin = extreme(log.lasMin, false) + offset + fastShift,
+                lcsMax = extreme(log.lcsMax, true) + offset + fastShift,
+                lcsMin = extreme(log.lcsMin, false) + offset + fastShift,
                 lzPeak = peaks.firstOrNull()?.db ?: -200.0,
                 lzPeakTime = peaks.firstOrNull()?.timeSec ?: 0.0,
                 thirdCentres = centres,
@@ -235,6 +237,16 @@ class Metrics private constructor(
                 for (j in maxOf(0, best - gapWindows)..minOf(log.size - 1, best + gapWindows)) used[j] = true
             }
             return out
+        }
+
+        /** Max or min over the values that are real measurements. */
+        private fun extreme(values: FloatArray, wantMax: Boolean): Double {
+            var best = Double.NaN
+            for (v in values) {
+                if (v.isNaN() || v <= -199f) continue
+                if (best.isNaN() || (if (wantMax) v > best else v < best)) best = v.toDouble()
+            }
+            return if (best.isNaN()) -200.0 else best
         }
 
         fun formatTime(seconds: Double): String {

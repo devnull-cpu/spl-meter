@@ -7,6 +7,17 @@ Built for measuring loud environments over long periods — the sort of
 measurement a handheld meter gives you a single number for, where you actually
 want the whole time and frequency history.
 
+<p align="center">
+  <img src="docs/screenshots/record.png" width="30%" alt="Live measurement">
+  <img src="docs/screenshots/report-metrics.png" width="30%" alt="Report metrics">
+  <img src="docs/screenshots/report-charts.png" width="30%" alt="SPL over time and spectrum">
+</p>
+<p align="center">
+  <img src="docs/screenshots/report-sub.png" width="30%" alt="Sub spectrum at 1 Hz resolution">
+  <img src="docs/screenshots/calibration.png" width="30%" alt="Calibration">
+  <img src="docs/screenshots/settings.png" width="30%" alt="Capture settings">
+</p>
+
 ## It stores measurements, not audio
 
 Each analysis window is reduced to a set of levels and band powers, and the

@@ -256,9 +256,13 @@ new Chart(document.getElementById('subChart'), {
         return "<br><span class=\"warn\">$base$caveat</span>"
     }
 
-    private fun card(label: String, value: Double, unit: String): String =
-        """<div class="metric"><div class="label">$label</div>
-           <div class="value">${f1(value)}<span class="unit">$unit</span></div></div>"""
+    private fun card(label: String, value: Double, unit: String): String {
+        // A metric with nothing usable behind it says so rather than printing a
+        // floor value that reads like a measurement.
+        val shown = if (!value.isFinite() || value <= -199.0) "—" else f1(value)
+        return """<div class="metric"><div class="label">$label</div>
+           <div class="value">$shown<span class="unit">$unit</span></div></div>"""
+    }
 
     private fun escape(s: String) = s
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

@@ -174,14 +174,16 @@ class WindowAnalyzer(
 
     private data class Fast(val aMax: Float, val aMin: Float, val cMax: Float, val cMin: Float)
 
+
+
     /**
      * Exponentially averaged A/C levels with a 125 ms time constant, tracked
      * across 50 ms sub-blocks. State carries over between windows so the
      * smoothing is continuous for the whole session.
      */
     private fun fastLevels(x: FloatArray): Fast {
-        var aMax = -200.0; var aMin = 200.0
-        var cMax = -200.0; var cMin = 200.0
+        var aMax = Float.NaN; var aMin = Float.NaN
+        var cMax = Float.NaN; var cMin = Float.NaN
         val bins = blockSamples / 2 + 1
         val n2 = blockSamples.toDouble() * blockSamples
 
@@ -206,16 +208,21 @@ class WindowAnalyzer(
             fastA = if (fastA < 0.0) aP else fastA + fastAlpha * (aP - fastA)
             fastC = if (fastC < 0.0) cP else fastC + fastAlpha * (cP - fastC)
 
-            val aDb = toDb(fastA).toDouble()
-            val cDb = toDb(fastC).toDouble()
-            if (aDb > aMax) aMax = aDb
-            if (aDb < aMin) aMin = aDb
-            if (cDb > cMax) cMax = cDb
-            if (cDb < cMin) cMin = cDb
+            val aDb = toDb(fastA)
+            val cDb = toDb(fastC)
+            if (aDb > SILENCE_FLOOR_DB) {
+                if (aMax.isNaN() || aDb > aMax) aMax = aDb
+                if (aMin.isNaN() || aDb < aMin) aMin = aDb
+            }
+            if (cDb > SILENCE_FLOOR_DB) {
+                if (cMax.isNaN() || cDb > cMax) cMax = cDb
+                if (cMin.isNaN() || cDb < cMin) cMin = cDb
+            }
 
             offset += blockSamples
         }
-        return Fast(aMax.toFloat(), aMin.toFloat(), cMax.toFloat(), cMin.toFloat())
+        // NaN means no block in this window carried a usable level.
+        return Fast(aMax, aMin, cMax, cMin)
     }
 
     private fun bandDb(start: Int, end: Int): Float {
@@ -226,6 +233,18 @@ class WindowAnalyzer(
     }
 
     companion object {
+        /**
+         * Below this, a block is not a measurement.
+         *
+         * A running minimum is permanently captured by its lowest sample, so a
+         * single block of digital silence — before the capture stream is really
+         * flowing, say — pins LASmin to the floor for the whole session and it
+         * can never recover. Genuinely quiet audio must still count, or the
+         * minimum is biased upwards, but a phone microphone always has self
+         * noise: a level down here means no data rather than a silent room.
+         */
+        const val SILENCE_FLOOR_DB = -120.0f
+
         fun toDb(power: Double): Float =
             if (power <= 1e-20) -200f else (10.0 * log10(power)).toFloat()
     }

@@ -124,6 +124,7 @@ class RecordingService : Service() {
             .also { it.setReferenceCounted(false); it.acquire() }
 
         running = true
+        frameOffsetBaseline = Long.MIN_VALUE
         captureThread = Thread({ captureLoop(title) }, "capture").apply {
             priority = Thread.MAX_PRIORITY
             start()
@@ -338,24 +339,36 @@ class RecordingService : Service() {
         @Volatile var droppedWindows = 0
         /** Frames the driver captured but we never read. Should stay 0. */
         @Volatile var missedFrames = 0L
-        var lasMax = -200f
-        var lasMin = 200f
-        var lcsMax = -200f
-        var lcsMin = 200f
+        var lasMax = Float.NaN
+        var lasMin = Float.NaN
+        var lcsMax = Float.NaN
+        var lcsMin = Float.NaN
         var lzPeak = -200f
+
+        // Windows with no usable level report NaN and are skipped, rather than
+        // dragging a running extreme to the floor.
+        private fun lower(a: Float, b: Float) = if (b.isNaN()) a else if (a.isNaN() || b < a) b else a
+        private fun higher(a: Float, b: Float) = if (b.isNaN()) a else if (a.isNaN() || b > a) b else a
 
         fun accumulate(w: WindowResult) {
             windows++
             if (w.clippedSamples > 0) clippedWindows++
-            if (w.lasMax > lasMax) lasMax = w.lasMax
-            if (w.lasMin < lasMin) lasMin = w.lasMin
-            if (w.lcsMax > lcsMax) lcsMax = w.lcsMax
-            if (w.lcsMin < lcsMin) lcsMin = w.lcsMin
+            lasMax = higher(lasMax, w.lasMax)
+            lasMin = lower(lasMin, w.lasMin)
+            lcsMax = higher(lcsMax, w.lcsMax)
+            lcsMin = lower(lcsMin, w.lcsMin)
             if (w.peak > lzPeak) lzPeak = w.peak
         }
     }
 
     private var lastFrameCheck = 0L
+    /**
+     * Offset between the driver's frame counter and ours at the start of a
+     * capture, which is buffer priming rather than lost audio: the hardware
+     * begins filling before the first read returns. Only growth beyond this
+     * baseline means samples actually went missing.
+     */
+    private var frameOffsetBaseline = Long.MIN_VALUE
 
     /**
      * Compares the driver's own frame counter against how many frames we have
@@ -376,11 +389,18 @@ class RecordingService : Service() {
         runCatching {
             val ts = AudioTimestamp()
             if (record.getTimestamp(ts, AudioTimestamp.TIMEBASE_MONOTONIC) != AudioRecord.SUCCESS) return
-            val missed = ts.framePosition - framesRead
+            val offset = ts.framePosition - framesRead
+            if (frameOffsetBaseline == Long.MIN_VALUE) {
+                frameOffsetBaseline = offset
+                Log.i(TAG, "capture frame offset baseline: $offset frames")
+                return
+            }
+            val missed = offset - frameOffsetBaseline
             // A frame or two of slop is just where the timestamp was sampled.
             if (missed > SAMPLE_RATE / 100 && missed > stats.missedFrames) {
                 stats.missedFrames = missed
-                Log.w(TAG, "capture gap: driver at ${ts.framePosition}, read $framesRead ($missed frames missed)")
+                Log.w(TAG, "capture gap: driver at ${ts.framePosition}, read $framesRead, " +
+                    "$missed frames beyond the startup baseline of $frameOffsetBaseline")
             }
         }
     }
