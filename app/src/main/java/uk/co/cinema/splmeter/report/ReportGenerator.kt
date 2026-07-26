@@ -24,8 +24,10 @@ object ReportGenerator {
         val started = SimpleDateFormat("EEE d MMM yyyy, HH:mm", Locale.UK).format(Date(meta.startEpochMillis))
 
         val peaksRows = m.topPeaks.mapIndexed { i, p ->
-            "<tr><td>${i + 1}</td><td>%.1f</td><td>%s</td><td>%.0f Hz</td></tr>"
-                .format(p.db, Metrics.formatTime(p.timeSec), p.dominantHz)
+            // A nominal 1/3 octave centre rather than one frequency, so it gets
+            // the band label: "%.0f Hz" would print 31.5 Hz as 32.
+            "<tr><td>${i + 1}</td><td>%.1f</td><td>%s</td><td>%s Hz</td></tr>"
+                .format(p.db, Metrics.formatTime(p.timeSec), Bands.label(p.dominantHz))
         }.joinToString("\n")
 
         val calNote = buildString {

@@ -77,11 +77,8 @@ class Metrics private constructor(
             val thirdPeakDb = DoubleArray(centres.size) { -200.0 }
             val subPowerSum = DoubleArray(log.header.subCount)
 
-            // Map each display band either to a stored 1/3 octave band, or to a
-            // range of 1 Hz sub bins to integrate.
-            val storedIndex = IntArray(centres.size) { b ->
-                log.header.thirdCentres.indexOfFirst { abs(it - centres[b]) < 0.01 }
-            }
+            val bandMap = BandMap(log, centres)
+            val storedIndex = bandMap.storedIndex
             // The 1 Hz sub bins run to 300 Hz but the lowest stored 1/3 octave
             // band is 315 Hz, whose lower edge is 280.6 Hz — so the two sets
             // overlap. Summing both wholesale counts that slice twice; for pink
@@ -92,24 +89,6 @@ class Metrics private constructor(
             val bandsFrom = log.header.thirdCentres.minOrNull()
                 ?.let { Bands.lowEdge(it) } ?: Double.MAX_VALUE
 
-            val subFrom = IntArray(centres.size)
-            val subTo = IntArray(centres.size)
-            for (b in centres.indices) {
-                if (storedIndex[b] >= 0) continue
-                val lo = Bands.lowEdge(centres[b])
-                val hi = Bands.highEdge(centres[b])
-                var from = -1
-                var to = -2
-                for (i in 0 until log.header.subCount) {
-                    val hz = log.subHz(i)
-                    if (hz >= lo && hz < hi) {
-                        if (from < 0) from = i
-                        to = i
-                    }
-                }
-                subFrom[b] = from
-                subTo[b] = to
-            }
 
             for (w in 0 until n) {
                 val sub = log.sub[w]
@@ -142,13 +121,7 @@ class Metrics private constructor(
 
                 // Band-resolved third-octave spectrum for the charts.
                 for (b in centres.indices) {
-                    val idx = storedIndex[b]
-                    var power = 0.0
-                    if (idx >= 0) {
-                        power = 10.0.pow(third[idx] / 10.0) * thirdCorr[idx]
-                    } else if (subFrom[b] >= 0) {
-                        for (i in subFrom[b]..subTo[b]) power += 10.0.pow(sub[i] / 10.0) * subCorr[i]
-                    }
+                    val power = bandMap.power(b, sub, third, subCorr, thirdCorr)
                     if (power > 0.0) {
                         thirdPowerSum[b] += power
                         val db = 10.0 * log10(power) + offset
@@ -193,7 +166,7 @@ class Metrics private constructor(
             }
             val subHz = DoubleArray(log.header.subCount) { log.subHz(it) }
 
-            val peaks = topPeaks(log, offset, subCorr, thirdCorr)
+            val peaks = topPeaks(log, offset, subCorr, thirdCorr, bandMap)
 
             return Metrics(
                 log = log,
@@ -227,7 +200,8 @@ class Metrics private constructor(
             log: SpectralLog.Log,
             offset: Double,
             subCorr: DoubleArray,
-            thirdCorr: DoubleArray
+            thirdCorr: DoubleArray,
+            bandMap: BandMap
         ): List<Metrics.PeakMoment> {
             if (log.size == 0) return emptyList()
             val used = BooleanArray(log.size)
@@ -242,17 +216,18 @@ class Metrics private constructor(
                 }
                 if (best < 0 || bestDb <= -199f) return@repeat
 
+                // Compare whole 1/3 octave bands, never a 1 Hz bin against a
+                // band. A band at 10 kHz is 2316 Hz wide, so on a flat spectrum
+                // it measures 33.6 dB above any single sub bin purely because
+                // the bucket is wider — enough to hand "dominant" to the top
+                // end whenever the real margin is smaller than that.
                 var domHz = 0.0
-                var domDb = -1e9
+                var domPower = 0.0
                 val sub = log.sub[best]
-                for (i in sub.indices) {
-                    val v = sub[i] + 10.0 * log10(subCorr[i])
-                    if (v > domDb) { domDb = v; domHz = log.subHz(i) }
-                }
                 val third = log.third[best]
-                for (i in third.indices) {
-                    val v = third[i] + 10.0 * log10(thirdCorr[i])
-                    if (v > domDb) { domDb = v; domHz = log.header.thirdCentres[i] }
+                for (b in bandMap.centres.indices) {
+                    val power = bandMap.power(b, sub, third, subCorr, thirdCorr)
+                    if (power > domPower) { domPower = power; domHz = bandMap.centres[b] }
                 }
 
                 out.add(Metrics.PeakMoment(bestDb + offset, log.tSec[best].toDouble(), domHz))
@@ -269,6 +244,53 @@ class Metrics private constructor(
                 if (best.isNaN() || (if (wantMax) v > best else v < best)) best = v.toDouble()
             }
             return if (best.isNaN()) -200.0 else best
+        }
+
+        /**
+         * Which stored values make up each display 1/3 octave band.
+         *
+         * Bands from 315 Hz up are stored directly; below that they are
+         * integrated back out of the 1 Hz sub bins. Both the spectrum chart and
+         * the peak table's dominant band go through this, so every band is
+         * measured the same way and over its full width.
+         */
+        private class BandMap(log: SpectralLog.Log, val centres: DoubleArray) {
+            val storedIndex = IntArray(centres.size) { b ->
+                log.header.thirdCentres.indexOfFirst { abs(it - centres[b]) < 0.01 }
+            }
+            private val subFrom = IntArray(centres.size) { -1 }
+            private val subTo = IntArray(centres.size) { -2 }
+
+            init {
+                for (b in centres.indices) {
+                    if (storedIndex[b] >= 0) continue
+                    val lo = Bands.lowEdge(centres[b])
+                    val hi = Bands.highEdge(centres[b])
+                    for (i in 0 until log.header.subCount) {
+                        val hz = log.subHz(i)
+                        if (hz >= lo && hz < hi) {
+                            if (subFrom[b] < 0) subFrom[b] = i
+                            subTo[b] = i
+                        }
+                    }
+                }
+            }
+
+            /** Corrected power in band [b] for one window. */
+            fun power(
+                b: Int,
+                sub: FloatArray,
+                third: FloatArray,
+                subCorr: DoubleArray,
+                thirdCorr: DoubleArray
+            ): Double {
+                val idx = storedIndex[b]
+                if (idx >= 0) return 10.0.pow(third[idx] / 10.0) * thirdCorr[idx]
+                if (subFrom[b] < 0) return 0.0
+                var power = 0.0
+                for (i in subFrom[b]..subTo[b]) power += 10.0.pow(sub[i] / 10.0) * subCorr[i]
+                return power
+            }
         }
 
         fun formatTime(seconds: Double): String {

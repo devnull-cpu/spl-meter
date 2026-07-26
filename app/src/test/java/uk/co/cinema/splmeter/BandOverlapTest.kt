@@ -129,6 +129,30 @@ class BandOverlapTest {
         )
     }
 
+    /**
+     * The dominant band of a peak must be chosen by comparing whole bands.
+     * Comparing a 1 Hz sub bin against a 1/3 octave band hands it to the top
+     * end on width alone.
+     */
+    @Test
+    fun theDominantBandIsAWholeBand() {
+        val sub = FloatArray(Bands.SUB_COUNT) { -200f }
+        val third = FloatArray(Bands.THIRD_OCTAVE_STORED.size) { -200f }
+
+        // The 63 Hz band spans 56.1 - 70.7 Hz: fourteen 1 Hz bins at 0 dB, so
+        // the band holds 11.5 dB in total but no single bin exceeds 0 dB.
+        for (hz in 57..70) sub[hz - Bands.SUB_LOW_HZ] = 0f
+        // One narrower-in-content but wider-in-storage band, at 5 dB. Comparing
+        // bin against band picks this; comparing band against band picks 63 Hz.
+        third[Bands.THIRD_OCTAVE_STORED.indexOfFirst { it == 10000.0 }] = 5f
+
+        val log = oneWindowLog(sub, third).also { it.peak[0] = 0f }
+        val m = Metrics.compute(log, flatCal())
+
+        assertEquals(1, m.topPeaks.size)
+        assertEquals(63.0, m.topPeaks[0].dominantHz, 1e-9)
+    }
+
     /** The RIFF size fields sit at bytes 4 and 40 and describe the right lengths. */
     @Test
     fun riffSizeFieldsAreWritten() {

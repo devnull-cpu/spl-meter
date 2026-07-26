@@ -1,6 +1,7 @@
 package uk.co.cinema.splmeter.audio
 
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.StateFlow
 import uk.co.cinema.splmeter.dsp.WindowResult
 import kotlin.math.log10
@@ -105,8 +106,11 @@ object Recorder {
         history.addLast(splA)
         while (history.size > HISTORY_LENGTH) history.removeFirst()
 
-        val shown = _state.value
-        _state.value = shown.copy(
+        // update{} is a compare-and-set retry, not a read-then-write: the
+        // capture thread publishes fast-meter levels between the two, and a
+        // plain copy of an earlier snapshot would put the stale level back.
+        _state.update { shown ->
+            shown.copy(
             elapsedSec = elapsedSec,
             windows = count,
             // With the fast meter running, leave the on-screen level alone —
@@ -121,39 +125,40 @@ object Recorder {
             clippingNow = w.clippedSamples > 0,
             clippedWindows = clippedWindows,
             history = history.toList()
-        )
+            )
+        }
     }
 
     /** Display-only update from the fast meter. Touches nothing that is stored. */
     fun onDisplay(aDb: Float, cDb: Float, zDb: Float, offset: Double) {
         if (!fastDisplay) return
-        val s = _state.value
-        if (!s.recording) return
-        _state.value = s.copy(
-            splA = (aDb + offset).toFloat(),
-            splC = (cDb + offset).toFloat(),
-            splZ = (zDb + offset).toFloat()
-        )
+        _state.update { s ->
+            if (!s.recording) s else s.copy(
+                splA = (aDb + offset).toFloat(),
+                splC = (cDb + offset).toFloat(),
+                splZ = (zDb + offset).toFloat()
+            )
+        }
     }
 
     fun setMicInfo(info: String) {
-        _state.value = _state.value.copy(micInfo = info)
+        _state.update { it.copy(micInfo = info) }
     }
 
     fun tick(elapsedSec: Double) {
-        if (_state.value.recording) _state.value = _state.value.copy(elapsedSec = elapsedSec)
+        _state.update { if (it.recording) it.copy(elapsedSec = elapsedSec) else it }
     }
 
     fun finish() {
-        _state.value = _state.value.copy(recording = false)
+        _state.update { it.copy(recording = false) }
     }
 
     fun fail(message: String) {
-        _state.value = _state.value.copy(recording = false, error = message)
+        _state.update { it.copy(recording = false, error = message) }
     }
 
     fun clearError() {
-        _state.value = _state.value.copy(error = null)
+        _state.update { it.copy(error = null) }
     }
 
     /** Session-wide energy averages, uncalibrated. */
