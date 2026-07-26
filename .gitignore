@@ -15,3 +15,6 @@ captures/
 keystore.properties
 *.jks
 *.keystore
+
+# Session notes live in the parent folder, outside both repositories.
+CLAUDE.md
