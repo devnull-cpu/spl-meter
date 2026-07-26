@@ -91,11 +91,32 @@ fun SettingsScreen() {
 
             Spacer(Modifier.height(16.dp))
             SwitchRow(
-                "Stereo capture, left channel",
-                "Records stereo and keeps the left channel. Mono lets the phone choose or mix " +
+                "Stereo capture",
+                "Records stereo and keeps one channel. Mono lets the phone choose or mix " +
                     "microphones. Falls back to mono if stereo is unavailable.",
-                s.stereoLeft, enabled = !locked
-            ) { Prefs.setStereoLeft(it) }
+                s.stereoCapture, enabled = !locked
+            ) { Prefs.setStereoCapture(it) }
+
+            if (s.stereoCapture) {
+                Spacer(Modifier.height(8.dp))
+                Text("Channel to measure", fontWeight = FontWeight.Medium)
+                Text(
+                    "Which microphone this is depends on the device. Use the one your cal file " +
+                        "was made from; the record screen shows which mic is in use.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(0 to "Left", 1 to "Right").forEach { (index, label) ->
+                        FilterChip(
+                            selected = s.channelIndex == index,
+                            onClick = { if (!locked) Prefs.setChannelIndex(index) },
+                            enabled = !locked,
+                            label = { Text(label) }
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(12.dp))
             SwitchRow(

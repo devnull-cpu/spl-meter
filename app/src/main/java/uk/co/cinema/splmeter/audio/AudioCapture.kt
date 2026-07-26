@@ -20,9 +20,18 @@ object AudioCapture {
     const val SAMPLE_RATE = 48000
     private const val TAG = "AudioCapture"
 
-    class Opened(val record: AudioRecord, val sourceName: String, val channels: Int) {
+    class Opened(
+        val record: AudioRecord,
+        val sourceName: String,
+        val channels: Int,
+        val channelIndex: Int
+    ) {
         val description: String
-            get() = sourceName + if (channels == 2) " (stereo, left)" else " (mono)"
+            get() = sourceName + when {
+                channels < 2 -> " (mono)"
+                channelIndex == 1 -> " (stereo, right)"
+                else -> " (stereo, left)"
+            }
     }
 
     /**
@@ -54,9 +63,11 @@ object AudioCapture {
 
         // Channel layout matters as much as the source. Asking for MONO lets the
         // HAL pick whichever built-in mic it considers primary, or downmix
-        // several of them — and a calibration made from the left channel of a
-        // stereo capture is only valid for that one physical mic.
-        val layouts = if (Prefs.state.value.stereoLeft) {
+        // several of them, and a calibration is only valid for the one physical
+        // mic it was measured on. Which channel that is depends on the device
+        // and on how the calibration was recorded, so it is selectable.
+        val channelIndex = Prefs.state.value.channelIndex
+        val layouts = if (Prefs.state.value.stereoCapture) {
             listOf(AudioFormat.CHANNEL_IN_STEREO to 2, AudioFormat.CHANNEL_IN_MONO to 1)
         } else {
             listOf(AudioFormat.CHANNEL_IN_MONO to 1)
@@ -75,7 +86,7 @@ object AudioCapture {
                 }
                 if (rec != null && rec.state == AudioRecord.STATE_INITIALIZED) {
                     Log.i(TAG, "capturing from $name, $channels channel(s) at $SAMPLE_RATE Hz")
-                    return Opened(rec, name, channels)
+                    return Opened(rec, name, channels, channelIndex)
                 }
                 runCatching { rec?.release() }
             }
@@ -87,12 +98,19 @@ object AudioCapture {
         )
     }
 
-    /** Copies the left channel out of an interleaved buffer. */
-    fun takeLeft(interleaved: ShortArray, out: ShortArray, frames: Int, channels: Int) {
+    /** Copies one channel out of an interleaved buffer. */
+    fun takeChannel(
+        interleaved: ShortArray,
+        out: ShortArray,
+        frames: Int,
+        channels: Int,
+        channelIndex: Int
+    ) {
         if (channels == 1) {
             System.arraycopy(interleaved, 0, out, 0, frames)
         } else {
-            for (i in 0 until frames) out[i] = interleaved[i * channels]
+            val c = channelIndex.coerceIn(0, channels - 1)
+            for (i in 0 until frames) out[i] = interleaved[i * channels + c]
         }
     }
 }

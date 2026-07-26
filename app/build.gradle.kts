@@ -32,7 +32,9 @@ android {
     signingConfigs {
         create("release") {
             if (hasSigningConfig) {
-                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                // Resolved against the project root so the same relative path
+                // works locally and in CI.
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
@@ -42,9 +44,8 @@ android {
 
     buildTypes {
         release {
-            // Left off until a signed release build has been verified on a
-            // device: shrinking is worth doing, but not worth shipping untested.
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasSigningConfig) signingConfig = signingConfigs.getByName("release")
         }

@@ -254,7 +254,7 @@ class RecordingService : Service() {
                 }
                 // Left channel only — the channel the calibration was measured on.
                 val n = read / channels
-                AudioCapture.takeLeft(interleaved, chunk, n, channels)
+                AudioCapture.takeChannel(interleaved, chunk, n, channels, opened.channelIndex)
                 wav?.write(chunk, n)
                 totalSamples += n
 

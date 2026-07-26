@@ -65,7 +65,9 @@ object LevelProbe {
                 val read = record.read(interleaved, 0, interleaved.size)
                 if (read <= 0) continue
                 val frames = read / opened.channels
-                AudioCapture.takeLeft(interleaved, chunk, frames, opened.channels)
+                AudioCapture.takeChannel(
+                    interleaved, chunk, frames, opened.channels, opened.channelIndex
+                )
 
                 var i = 0
                 while (i < frames) {

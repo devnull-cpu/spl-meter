@@ -29,9 +29,10 @@ and every past session updates with it.
 - Captures from `AudioSource.UNPROCESSED` — no AGC, noise suppression or echo
   cancellation, all of which would wreck an SPL measurement. Falls back to
   `VOICE_RECOGNITION` then `MIC`, and the source used is recorded per session.
-- Stereo capture keeping the left channel, so the mic being measured is the mic
-  the calibration was made on. Requesting mono lets the audio HAL pick or mix
-  microphones.
+- Stereo capture keeping one selectable channel, so the mic being measured is
+  the mic the calibration was made on. Requesting mono instead lets the audio
+  HAL pick or mix microphones. Which channel corresponds to which physical mic
+  varies by device; the record screen names the mic actually in use.
 - A and C weighting applied in the frequency domain, from the analytic IEC 61672
   definitions. Z weighting band-limited to 10 Hz–20 kHz — `UNPROCESSED` applies
   no high-pass at all, so without that, rumble and DC drift land straight in
@@ -73,7 +74,7 @@ the microphone's own response, which is *subtracted* from the measurement, and a
 `Sens Factor` line fixing the absolute level.
 
 ```
-"Sens Factor =-2.06dB, measured against a reference microphone"
+"Sens Factor =-1.50dB, measured against a reference microphone"
 20.000	-2.6780
 ...
 ```
@@ -136,9 +137,9 @@ by a flat battery still yields everything up to that point.
 The DSP is checked two ways, both offline and reproducible.
 
 **Against an independent implementation.** `WavHarnessTest` pushes a WAV through
-exactly the analysis path the app runs live. On a 2 h 47 min recording of
-programme material it matches a separate Python implementation of the same
-metrics exactly:
+exactly the analysis path the app runs live, so its output can be compared with
+another tool on the same file. On a 2 h 47 min test recording it matched a
+separate Python implementation of the same metrics exactly:
 
 | | reference | this app |
 | --- | --- | --- |
@@ -182,7 +183,7 @@ The offline harnesses are skipped unless given a file:
 
 ```
 ./gradlew :app:testDebugUnitTest --tests "*WavHarness*" \
-    -Dwav=recording.wav -Dsens=-2.06 -Dwindow=5 -Drepair=false
+    -Dwav=recording.wav -Dsens=-1.50 -Dwindow=5 -Drepair=false
 ```
 
 ## Known limits
@@ -194,10 +195,12 @@ The offline harnesses are skipped unless given a file:
   scale a peak went and that LZpeak should be read as a lower bound.
 - 16-bit capture gives 96 dB of range. Adequate for loud environments, but less
   headroom than a dedicated recorder.
-- Clipping essentially only affects LZpeak. Measured across a whole session,
-  repair moved LZpeak by 3.3 dB and every other metric by 0.1 dB or less — at
-  0.0065% of samples clipped, the restored energy is worth 0.015 dB on Leq.
-  Leq from a lightly clipped measurement is trustworthy as it stands.
+- Clipping essentially only affects LZpeak. On one test session, repair moved
+  LZpeak by 3.3 dB and every other metric by 0.1 dB or less: at 0.0065% of
+  samples clipped the restored energy is worth 0.015 dB on Leq. As a rule of
+  thumb clipping has to reach about 0.05% of samples before Leq(Z) shifts even
+  0.1 dB, so Leq from a lightly clipped measurement is trustworthy as it
+  stands — check the clipped-sample count before assuming that holds.
 - Fast time-weighted extremes are computed without the response curve; when a
   curve is applied they are shifted by its session-average effect rather than
   recomputed exactly.

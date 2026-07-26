@@ -70,7 +70,7 @@ fun RecordScreen(onOpenReport: (String) -> Unit) {
         OutlinedTextField(
             value = title,
             onValueChange = { title = it },
-            label = { Text("Film / venue") },
+            label = { Text("Name (optional)") },
             singleLine = true,
             enabled = !state.recording,
             modifier = Modifier.fillMaxWidth()

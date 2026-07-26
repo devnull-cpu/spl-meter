@@ -44,11 +44,13 @@ object Prefs {
          */
         val displaySeconds: Float = 0.5f,
         /**
-         * Capture stereo and keep the left channel rather than asking for mono.
-         * Mono lets the HAL choose or mix microphones; a cal file is only valid
-         * for the one physical mic it was measured on.
+         * Capture stereo and keep one channel, rather than asking for mono.
+         * Mono lets the audio HAL choose or mix microphones, and a cal file is
+         * only valid for the one physical mic it was measured on.
          */
-        val stereoLeft: Boolean = true,
+        val stereoCapture: Boolean = true,
+        /** Which channel of a stereo capture to measure: 0 = left, 1 = right. */
+        val channelIndex: Int = 0,
         /** Band-limit the weighted sums to 10 Hz and up, per IEC 61672. */
         val bandLimit: Boolean = true,
         /** Subtract each window's mean before analysis. */
@@ -72,7 +74,8 @@ object Prefs {
             source = runCatching { Source.valueOf(sp.getString("source", null) ?: "AUTO") }
                 .getOrDefault(Source.AUTO),
             displaySeconds = sp.getFloat("displaySeconds", 0.5f),
-            stereoLeft = sp.getBoolean("stereoLeft", true),
+            stereoCapture = sp.getBoolean("stereoCapture", true),
+            channelIndex = sp.getInt("channelIndex", 0),
             bandLimit = sp.getBoolean("bandLimit", true),
             removeDc = sp.getBoolean("removeDc", true),
             declick = sp.getBoolean("declick", true),
@@ -93,7 +96,8 @@ object Prefs {
             .putFloat("windowSeconds", s.windowSeconds)
             .putString("source", s.source.name)
             .putFloat("displaySeconds", s.displaySeconds)
-            .putBoolean("stereoLeft", s.stereoLeft)
+            .putBoolean("stereoCapture", s.stereoCapture)
+            .putInt("channelIndex", s.channelIndex)
             .putBoolean("bandLimit", s.bandLimit)
             .putBoolean("removeDc", s.removeDc)
             .putBoolean("declick", s.declick)
@@ -109,7 +113,8 @@ object Prefs {
     fun setWindowSeconds(v: Float) = update { copy(windowSeconds = v) }
     fun setSource(v: Source) = update { copy(source = v) }
     fun setDisplaySeconds(v: Float) = update { copy(displaySeconds = v) }
-    fun setStereoLeft(v: Boolean) = update { copy(stereoLeft = v) }
+    fun setStereoCapture(v: Boolean) = update { copy(stereoCapture = v) }
+    fun setChannelIndex(v: Int) = update { copy(channelIndex = v) }
     fun setBandLimit(v: Boolean) = update { copy(bandLimit = v) }
     fun setRemoveDc(v: Boolean) = update { copy(removeDc = v) }
     fun setDeclick(v: Boolean) = update { copy(declick = v) }

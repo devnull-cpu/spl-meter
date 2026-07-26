@@ -47,7 +47,7 @@ jobs:
         run: |
           echo "$KEYSTORE_BASE64" | base64 -d > release.jks
           cat > keystore.properties <<EOF
-          storeFile=$(pwd)/release.jks
+          storeFile=release.jks
           storePassword=$KEYSTORE_PASSWORD
           keyAlias=$KEY_ALIAS
           keyPassword=$KEY_PASSWORD

@@ -47,7 +47,7 @@ fun CalibrationScreen(onCalibrateLevel: () -> Unit = {}) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching {
-            val name = uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "cal.txt"
+            val name = displayName(context, uri)
             val text = context.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
             val parsed = CalFile.parse(name, text)
             require(parsed.sensFactor != null || parsed.hasCurve) {
@@ -152,6 +152,26 @@ fun CalibrationScreen(onCalibrateLevel: () -> Unit = {}) {
 
         Spacer(Modifier.height(24.dp))
     }
+}
+
+/**
+ * The file's real name, from the content provider.
+ *
+ * A document URI's last path segment is an opaque id, not a filename — picking
+ * from Downloads gives something like `msf:1234`, which was being saved and
+ * shown as "1234".
+ */
+private fun displayName(context: android.content.Context, uri: android.net.Uri): String {
+    runCatching {
+        context.contentResolver.query(
+            uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
+        )?.use { c ->
+            val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (i >= 0 && c.moveToFirst()) c.getString(i)?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+    }
+    return uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':')?.plus(".txt")
+        ?: "cal.txt"
 }
 
 @Composable
