@@ -175,6 +175,59 @@ absolute. Per clipped run, at a clipping density of 0.2% of samples:
 `PeakForensicsTest` prints the waveform through individual clipped runs for
 inspecting a single reconstruction.
 
+## Is it safe to install?
+
+Sideloading an APK means trusting whoever built it, so here is what can be
+checked rather than taken on faith.
+
+**It has no network access.** The app does not request `android.permission.INTERNET`,
+so Android will not let it open a network connection at all — measurements
+cannot leave the device even in principle. The permissions it does declare:
+
+| Permission | Why |
+| --- | --- |
+| `RECORD_AUDIO` | measuring sound |
+| `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE` | keep measuring with the screen off |
+| `POST_NOTIFICATIONS` | the ongoing notification showing the live level |
+| `WAKE_LOCK` | stop the CPU sleeping mid-session |
+
+Check for yourself, against the APK you downloaded:
+
+```
+aapt2 dump permissions app-release.apk
+```
+
+There is no analytics, no crash reporting and no advertising SDK. The report's
+charts use a copy of Chart.js bundled into the app rather than loaded from a CDN,
+which is part of why no network access is needed.
+
+**It is built in the open.** Release APKs are built by GitHub Actions from the
+tagged commit in this repository — not uploaded from anyone's machine — and are
+signed and attested. You can verify that the file you downloaded came from this
+repository and this workflow:
+
+```
+gh attestation verify app-release.apk --repo devnull-cpu/spl-meter
+```
+
+Each release also publishes the APK's SHA-256, and the signing certificate can be
+inspected with:
+
+```
+apksigner verify --print-certs app-release.apk
+```
+
+**What it stores, and where.** Everything stays in the app's own directory on
+your device, `Android/data/uk.co.cinema.splmeter/files/sessions/`. Sessions hold
+per-window levels and band powers, not audio, unless you explicitly turn on
+"Save raw audio". Nothing is uploaded, and uninstalling removes it all.
+
+**What none of this proves.** An antivirus scan of an unfamiliar APK mostly
+shows it does not match a known malware signature, which is weak evidence, so
+none is offered here. The claims above are the ones that can actually be
+verified: the permission set is enforced by Android, the provenance attestation
+is cryptographic, and the source is here to read.
+
 ## Building
 
 Needs JDK 17+ and an Android SDK with platform 36. Create a `local.properties`

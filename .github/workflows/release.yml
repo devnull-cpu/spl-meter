@@ -21,6 +21,10 @@ on:
 
 permissions:
   contents: write
+  # Required to attest that this artifact was built by this workflow from this
+  # commit, which anyone can then verify cryptographically.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -60,8 +64,45 @@ jobs:
         if: always()
         run: rm -f release.jks keystore.properties
 
+      # Proves the APK came from this workflow, this repository and this commit,
+      # rather than from someone's laptop.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: app/build/outputs/apk/release/app-release.apk
+
+      - name: Checksum and permissions manifest
+        run: |
+          cd app/build/outputs/apk/release
+          sha256sum app-release.apk > app-release.apk.sha256
+          cat app-release.apk.sha256
+          {
+            echo '## Verifying this build'
+            echo
+            echo 'SHA-256:'
+            echo '```'
+            cat app-release.apk.sha256
+            echo '```'
+            echo
+            echo 'Permissions declared by this APK:'
+            echo '```'
+            "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump permissions app-release.apk               | grep uses-permission || true
+            echo '```'
+            echo
+            echo 'No INTERNET permission: the app cannot make network connections.'
+            echo
+            echo 'Verify provenance:'
+            echo '```'
+            echo 'gh attestation verify app-release.apk --repo ${{ github.repository }}'
+            echo '```'
+          } > notes.md
+          cat notes.md
+
       - name: Attach APK to the release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/app-release.apk
+          files: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/apk/release/app-release.apk.sha256
+          body_path: app/build/outputs/apk/release/notes.md
           generate_release_notes: true
