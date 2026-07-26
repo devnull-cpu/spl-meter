@@ -58,6 +58,9 @@ class RecordingService : Service() {
 
         const val SAMPLE_RATE = 48000
 
+        /** How often the session summary is rewritten while recording. */
+        private const val CHECKPOINT_MS = 60_000L
+
         fun start(context: Context, title: String) {
             val i = Intent(context, RecordingService::class.java).apply {
                 action = ACTION_START
@@ -207,23 +210,41 @@ class RecordingService : Service() {
                 savingWav = settings.saveRawAudio,
                 fastDisplay = settings.displaySeconds > 0f
             )
-            SessionStore.save(
-                SessionMeta(
-                    id = id, title = title.ifBlank { id },
-                    startEpochMillis = startedAt.time, durationSec = 0.0,
-                    sampleRate = SAMPLE_RATE, windowSamples = windowSamples, windowCount = 0,
-                    calNameAtRecord = calibration.name,
-                    audioSource = opened.description,
-                    calOverride = if (embedded != null) SessionMeta.EMBEDDED else "",
-                    hasWav = settings.saveRawAudio,
-                    clippedWindows = 0
-                )
-            )
-
             // Analysis runs on its own thread so a slow window can never stall
             // the reader and drop samples.
             val stats = SessionStats()
             val logWriter = writer
+            var lastCheckpoint = System.currentTimeMillis()
+            // Resolved once the stream is running, after the first save; read
+            // at call time so later checkpoints pick it up.
+            var micDescription = ""
+
+            // One description of the session, written repeatedly as it grows.
+            fun snapshotMeta(): SessionMeta {
+                val (leqA, leqC, leqZ) = Recorder.summary()
+                return SessionMeta(
+                    id = id, title = title.ifBlank { id },
+                    startEpochMillis = startedAt.time,
+                    durationSec = stats.windows * windowSamples.toDouble() / SAMPLE_RATE,
+                    sampleRate = SAMPLE_RATE, windowSamples = windowSamples,
+                    windowCount = stats.windows,
+                    calNameAtRecord = calibration.name,
+                    audioSource = opened.description,
+                    device = deviceName(),
+                    appVersion = appVersion(),
+                    microphone = micDescription,
+                    calOverride = if (embedded != null) SessionMeta.EMBEDDED else "",
+                    hasWav = settings.saveRawAudio,
+                    clippedWindows = stats.clippedWindows,
+                    droppedWindows = stats.droppedWindows,
+                    missedFrames = stats.missedFrames,
+                    leqA = leqA, leqC = leqC, leqZ = leqZ,
+                    lasMax = stats.lasMax, lasMin = stats.lasMin,
+                    lcsMax = stats.lcsMax, lcsMin = stats.lcsMin,
+                    lzPeak = stats.lzPeak
+                )
+            }
+            SessionStore.save(snapshotMeta())
             processor.execute {
                 while (true) {
                     val buf = pending.poll(500, TimeUnit.MILLISECONDS)
@@ -238,6 +259,19 @@ class RecordingService : Service() {
                         logWriter.append(result)
                         Recorder.onWindow(result, calibration.splOffset, t + windowSamples.toDouble() / SAMPLE_RATE)
                         updateNotification(result, calibration.splOffset)
+
+                        // The log is flushed per window, but the metadata used
+                        // to be written only at the start and the end — so a
+                        // session interrupted by a crash held a full log and a
+                        // summary saying nothing had happened. Checkpointing
+                        // means the worst case is a minute of staleness rather
+                        // than the whole recording. Written from this thread
+                        // because these are its counters.
+                        val now = System.currentTimeMillis()
+                        if (now - lastCheckpoint >= CHECKPOINT_MS) {
+                            lastCheckpoint = now
+                            SessionStore.save(snapshotMeta())
+                        }
                     } catch (e: Throwable) {
                         // Without this the task dies inside the executor, which
                         // swallows the throw: capture would carry on filling a
@@ -255,6 +289,7 @@ class RecordingService : Service() {
 
             record.startRecording()
             val micInfo = logActiveMicrophones(record)
+            micDescription = micInfo
             Recorder.setMicInfo(micInfo)
 
             val interleaved = ShortArray(4096 * channels)
@@ -331,27 +366,8 @@ class RecordingService : Service() {
             runCatching { processor.submit { }.get(10, TimeUnit.SECONDS) }
                 .onFailure { Log.w(TAG, "analysis drain did not complete", it) }
 
-            val (leqA, leqC, leqZ) = Recorder.summary()
-            SessionStore.save(
-                SessionMeta(
-                    id = id, title = title.ifBlank { id },
-                    startEpochMillis = startedAt.time,
-                    durationSec = stats.windows * windowSamples.toDouble() / SAMPLE_RATE,
-                    sampleRate = SAMPLE_RATE, windowSamples = windowSamples,
-                    windowCount = stats.windows,
-                    calNameAtRecord = calibration.name,
-                    audioSource = opened.description,
-                    hasWav = settings.saveRawAudio,
-                    calOverride = if (embedded != null) SessionMeta.EMBEDDED else "",
-                    clippedWindows = stats.clippedWindows,
-                    droppedWindows = stats.droppedWindows,
-                    missedFrames = stats.missedFrames,
-                    leqA = leqA, leqC = leqC, leqZ = leqZ,
-                    lasMax = stats.lasMax, lasMin = stats.lasMin,
-                    lcsMax = stats.lcsMax, lcsMin = stats.lcsMin,
-                    lzPeak = stats.lzPeak
-                )
-            )
+            SessionStore.save(snapshotMeta())
+
             // The session is saved either way; a mid-recording analysis failure
             // means it is short, not that it is worthless.
             val failure = stats.analysisFailure
@@ -408,6 +424,14 @@ class RecordingService : Service() {
     }
 
     private var lastFrameCheck = 0L
+
+    /** Which phone made the recording — a calibration is only valid for one. */
+    private fun deviceName(): String =
+        "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "unknown" }
+
+    private fun appVersion(): String = runCatching {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: ""
+    }.getOrDefault("")
 
     /**
      * Compares the driver's own frame counter against how many frames we have

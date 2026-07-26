@@ -77,7 +77,7 @@ td { padding: 6px 8px; border-top: 0.5px solid rgba(255,255,255,0.06); }
 <div class="header">
   <h1>${escape(meta.title)}</h1>
   <p>$started · ${Metrics.formatTime(m.durationSec)} · window ${"%.0f".format(m.windowSeconds)}s · ${m.log.size} windows<br>
-  $calNote${clipNote(m, uncal)}</p>
+  $calNote${clipNote(m, uncal)}${deviceNote(meta)}</p>
 </div>
 
 <div class="metrics">
@@ -256,6 +256,21 @@ new Chart(document.getElementById('subChart'), {
                 "beyond the microphone's linear range — treat LZpeak as a lower bound"
         else ""
         return "<br><span class=\"warn\">$base$caveat</span>"
+    }
+
+    /**
+     * What made the recording. A measurement is only as attributable as its
+     * chain: which phone, which source and channel, and which physical mic the
+     * device resolved that to — a cal file is valid for exactly one of them.
+     */
+    private fun deviceNote(meta: SessionMeta): String {
+        val parts = listOfNotNull(
+            meta.device.takeIf { it.isNotBlank() },
+            meta.audioSource.takeIf { it.isNotBlank() && it != "unknown" },
+            meta.microphone.takeIf { it.isNotBlank() },
+            meta.appVersion.takeIf { it.isNotBlank() }?.let { "app $it" }
+        )
+        return if (parts.isEmpty()) "" else "<br>" + escape(parts.joinToString(" · "))
     }
 
     private fun card(label: String, value: Double, unit: String): String {

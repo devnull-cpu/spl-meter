@@ -26,6 +26,27 @@ data class SessionMeta(
     /** The microphone source actually used — a calibration is only valid for one. */
     val audioSource: String,
     /**
+     * The phone that made the recording, and the app version that wrote it.
+     *
+     * A calibration is only valid for the microphone it was measured on, so a
+     * session that does not name its device cannot be checked against the cal
+     * file it was analysed with — and a session folder is meant to stand on its
+     * own when copied off the phone. Blank on anything recorded before this
+     * was stored.
+     */
+    val device: String = "",
+    val appVersion: String = "",
+    /**
+     * The physical microphone the device actually resolved the request to,
+     * as reported by AudioRecord.activeMicrophones.
+     *
+     * [audioSource] records what was asked for — the source and the channel —
+     * which is not the same thing: the HAL chooses which element that maps to.
+     * A cal file belongs to one element, so this is what says whether it
+     * applies. Blank where the device reports nothing, which is common.
+     */
+    val microphone: String = "",
+    /**
      * Which cal file to analyse this recording with. A calibration belongs to
      * the recording, not to the app: a phone file and a UMIK file should not
      * fight over one global setting, and changing cal must not silently
@@ -70,6 +91,8 @@ data class SessionMeta(
         put("windowCount", windowCount)
         put("calNameAtRecord", calNameAtRecord)
         put("audioSource", audioSource)
+        put("device", device); put("appVersion", appVersion)
+        put("microphone", microphone)
         put("calOverride", calOverride ?: JSONObject.NULL)
         put("applyCurve", applyCurve)
         put("hasWav", hasWav); put("clippedWindows", clippedWindows)
@@ -97,6 +120,9 @@ data class SessionMeta(
                 windowCount = o.optInt("windowCount", 0),
                 calNameAtRecord = o.optString("calNameAtRecord", "None"),
                 audioSource = o.optString("audioSource", "unknown"),
+                device = o.optString("device", ""),
+                appVersion = o.optString("appVersion", ""),
+                microphone = o.optString("microphone", ""),
                 calOverride = if (o.isNull("calOverride")) null else o.optString("calOverride"),
                 applyCurve = o.optBoolean("applyCurve", true),
                 hasWav = o.optBoolean("hasWav", false),
@@ -148,13 +174,75 @@ object SessionStore {
     fun newId(at: Date = Date()): String =
         SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.UK).format(at)
 
+    /**
+     * Replaces the metadata in one step.
+     *
+     * writeText truncates in place, so a process killed inside it leaves a
+     * half-written file that will not parse — and since [list] drops sessions
+     * whose metadata cannot be read, an intact recording would silently vanish
+     * from the app. Writing beside it and renaming means a reader sees either
+     * the old file or the new one, never a torn one.
+     */
     fun save(meta: SessionMeta) {
-        metaFile(meta.id).writeText(meta.toJson())
+        val target = metaFile(meta.id)
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        runCatching {
+            tmp.writeText(meta.toJson())
+            if (tmp.renameTo(target)) return
+        }
+        // Some filesystems refuse a rename over an existing file. Falling back
+        // to a direct write is worse, but it is better than not saving at all.
+        runCatching { tmp.delete() }
+        target.writeText(meta.toJson())
     }
 
-    fun load(id: String): SessionMeta? = runCatching {
-        SessionMeta.fromJson(metaFile(id).readText())
-    }.getOrNull()
+    fun load(id: String): SessionMeta? {
+        val meta = runCatching {
+            SessionMeta.fromJson(metaFile(id).readText())
+        }.getOrNull() ?: return null
+        return if (meta.windowCount == 0) recoverFromLog(meta) else meta
+    }
+
+    /**
+     * Rebuilds a session's summary from its spectral log.
+     *
+     * Metadata is written when a recording starts and again when it ends, with
+     * checkpoints in between; a recording that died before its first checkpoint
+     * still has a complete log but metadata saying nothing happened, which
+     * shows in the list as an empty session and leaves the trim range at zero.
+     * Every stored window is on disk, so the summary can simply be recomputed.
+     */
+    private fun recoverFromLog(meta: SessionMeta): SessionMeta {
+        val log = runCatching { SpectralLog.read(logFile(meta.id)) }.getOrNull()
+        if (log == null || log.size == 0) return meta
+
+        fun energyMean(v: FloatArray): Float =
+            (10.0 * kotlin.math.log10(v.sumOf { Math.pow(10.0, it / 10.0) } / v.size)).toFloat()
+        fun extreme(v: FloatArray, wantMax: Boolean): Float {
+            var best = Float.NaN
+            for (x in v) {
+                if (x.isNaN() || x <= -199f) continue
+                if (best.isNaN() || (if (wantMax) x > best else x < best)) best = x
+            }
+            return if (best.isNaN()) -200f else best
+        }
+
+        val recovered = meta.copy(
+            durationSec = log.durationSec,
+            windowCount = log.size,
+            clippedWindows = log.clippedSamples.count { it > 0 },
+            leqA = energyMean(log.laeq),
+            leqC = energyMean(log.lceq),
+            leqZ = energyMean(log.lzeq),
+            lasMax = extreme(log.lasMax, true),
+            lasMin = extreme(log.lasMin, false),
+            lcsMax = extreme(log.lcsMax, true),
+            lcsMin = extreme(log.lcsMin, false),
+            lzPeak = extreme(log.peak, true)
+        )
+        save(recovered)
+        return recovered
+    }
 
     fun list(): List<SessionMeta> =
         root.listFiles()?.filter { it.isDirectory }
