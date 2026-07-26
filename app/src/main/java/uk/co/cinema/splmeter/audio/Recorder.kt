@@ -120,8 +120,9 @@ object Recorder {
             splZ = if (fastDisplay) shown.splZ else splZ,
             leqA = (10.0 * log10(aCalSum / count) + offset).toFloat(),
             leqC = (10.0 * log10(cCalSum / count) + offset).toFloat(),
-            peakHold = peakHoldDb,
-            lasMax = lasMaxDb,
+            // Still -Infinity if no window has carried a usable level yet.
+            peakHold = if (peakHoldDb.isFinite()) peakHoldDb else Float.NaN,
+            lasMax = if (lasMaxDb.isFinite()) lasMaxDb else Float.NaN,
             clippingNow = w.clippedSamples > 0,
             clippedWindows = clippedWindows,
             history = history.toList()

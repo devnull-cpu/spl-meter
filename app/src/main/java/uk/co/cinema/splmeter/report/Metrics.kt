@@ -236,14 +236,21 @@ class Metrics private constructor(
             return out
         }
 
-        /** Max or min over the values that are real measurements. */
+        /**
+         * Max or min over the values that are real measurements, or NaN.
+         *
+         * Returning the floor instead would not survive the calibration offset:
+         * -200 plus a +122 dB offset is -78, which passes every "is this a real
+         * reading" check downstream and prints as though it were one. NaN stays
+         * NaN through the arithmetic and renders as a dash.
+         */
         private fun extreme(values: FloatArray, wantMax: Boolean): Double {
             var best = Double.NaN
             for (v in values) {
                 if (v.isNaN() || v <= -199f) continue
                 if (best.isNaN() || (if (wantMax) v > best else v < best)) best = v.toDouble()
             }
-            return if (best.isNaN()) -200.0 else best
+            return best
         }
 
         /**

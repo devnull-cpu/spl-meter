@@ -158,7 +158,7 @@ fun RecordScreen(onOpenReport: (String) -> Unit) {
 private fun BigLevel(value: Float, unit: String) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            if (value.isNaN()) "—" else "%.1f".format(value),
+            if (!value.isFinite()) "—" else "%.1f".format(value),
             fontSize = 72.sp,
             fontWeight = FontWeight.Light,
             fontFamily = FontFamily.SansSerif,
@@ -172,7 +172,7 @@ private fun BigLevel(value: Float, unit: String) {
 private fun Small(label: String, value: Float, decimals: Int = 1) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            if (value.isNaN()) "—" else "%.${decimals}f".format(value),
+            if (!value.isFinite()) "—" else "%.${decimals}f".format(value),
             fontSize = 20.sp,
             fontWeight = FontWeight.Medium
         )

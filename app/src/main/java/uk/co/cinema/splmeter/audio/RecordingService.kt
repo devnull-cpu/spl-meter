@@ -239,9 +239,11 @@ class RecordingService : Service() {
                     droppedWindows = stats.droppedWindows,
                     missedFrames = stats.missedFrames,
                     leqA = leqA, leqC = leqC, leqZ = leqZ,
-                    lasMax = stats.lasMax, lasMin = stats.lasMin,
-                    lcsMax = stats.lcsMax, lcsMin = stats.lcsMin,
-                    lzPeak = stats.lzPeak
+                    // NaN is how a window with no usable level is marked, and
+                    // there are none at all until the first window is analysed.
+                    lasMax = level(stats.lasMax), lasMin = level(stats.lasMin),
+                    lcsMax = level(stats.lcsMax), lcsMin = level(stats.lcsMin),
+                    lzPeak = level(stats.lzPeak)
                 )
             }
             SessionStore.save(snapshotMeta())
@@ -424,6 +426,8 @@ class RecordingService : Service() {
     }
 
     private var lastFrameCheck = 0L
+
+    private fun level(v: Float): Float = if (v.isFinite()) v else SessionMeta.NONE
 
     /** Which phone made the recording — a calibration is only valid for one. */
     private fun deviceName(): String =

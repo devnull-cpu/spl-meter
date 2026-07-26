@@ -98,15 +98,30 @@ data class SessionMeta(
         put("hasWav", hasWav); put("clippedWindows", clippedWindows)
         put("trimStartSec", trimStartSec); put("trimEndSec", trimEndSec)
         put("droppedWindows", droppedWindows); put("missedFrames", missedFrames)
-        put("leqA", leqA.toDouble()); put("leqC", leqC.toDouble()); put("leqZ", leqZ.toDouble())
-        put("lasMax", lasMax.toDouble()); put("lasMin", lasMin.toDouble())
-        put("lcsMax", lcsMax.toDouble()); put("lcsMin", lcsMin.toDouble())
-        put("lzPeak", lzPeak.toDouble())
+        putLevel("leqA", leqA); putLevel("leqC", leqC); putLevel("leqZ", leqZ)
+        putLevel("lasMax", lasMax); putLevel("lasMin", lasMin)
+        putLevel("lcsMax", lcsMax); putLevel("lcsMin", lcsMin)
+        putLevel("lzPeak", lzPeak)
     }.toString(2)
+
+    /**
+     * A level, or the floor where there is not one.
+     *
+     * NaN means "no usable measurement" inside the analyser, but JSONObject
+     * rejects it outright — and a throw here loses the whole save, which for a
+     * recording in progress means losing the session's metadata entirely. The
+     * floor value is what the rest of the file already uses for "none".
+     */
+    private fun JSONObject.putLevel(key: String, value: Float) {
+        put(key, if (value.isFinite()) value.toDouble() else NONE.toDouble())
+    }
 
     companion object {
         /** Use the cal file copied into the session folder at record time. */
         const val EMBEDDED = "@embedded"
+
+        /** Stand-in for a level that was never measured. */
+        const val NONE = -200f
 
         fun fromJson(text: String): SessionMeta {
             val o = JSONObject(text)
