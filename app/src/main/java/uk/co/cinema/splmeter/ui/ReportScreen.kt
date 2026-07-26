@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -246,7 +249,15 @@ fun ReportScreen(sessionId: String, onBack: () -> Unit) {
                     }
 
                     IconButton(onClick = { trimPanelOpen = !trimPanelOpen }) {
-                        Icon(Icons.Default.ContentCut, contentDescription = "Trim")
+                        // Tinted while the panel is open: without it there is
+                        // nothing to say the button is a toggle, so the way to
+                        // close the panel is invisible.
+                        Icon(
+                            Icons.Default.ContentCut,
+                            contentDescription = if (trimPanelOpen) "Close time range" else "Time range",
+                            tint = if (trimPanelOpen) MaterialTheme.colorScheme.primary
+                                   else LocalContentColor.current
+                        )
                     }
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "Export")
@@ -286,8 +297,19 @@ fun ReportScreen(sessionId: String, onBack: () -> Unit) {
             Card(Modifier.fillMaxWidth().padding(8.dp)) {
                 Column(Modifier.padding(12.dp)) {
 
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Analyse a time range",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { trimPanelOpen = false },
+                            modifier = Modifier.size(24.dp)
+                        ) { Icon(Icons.Default.Close, contentDescription = "Close") }
+                    }
+
                     if (fullDuration > 0f) {
-                    Text("Analyse a time range", style = MaterialTheme.typography.titleSmall)
                     Text(
                         "Analyses only this range. The full log is kept, so this can be changed " +
                             "or cleared at any time.",
@@ -329,6 +351,12 @@ fun ReportScreen(sessionId: String, onBack: () -> Unit) {
                             }
                         }) { Text("Reset to full") }
                     }
+                    } else {
+                        Text(
+                            "No time range is available: this recording has no analysed windows.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
