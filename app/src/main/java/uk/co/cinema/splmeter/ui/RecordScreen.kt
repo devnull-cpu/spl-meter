@@ -138,7 +138,6 @@ fun RecordScreen(onOpenReport: (String) -> Unit) {
                 StatusRow("Response curve", when {
                     !cal.hasCurve -> "none"
                     !settings.applyCalCurve -> "loaded, not applied"
-                    cal.legacyInvertedCurve -> "applied (legacy inverted file)"
                     else -> "applied"
                 })
                 StatusRow("Window", "%.0f s".format(settings.windowSeconds))

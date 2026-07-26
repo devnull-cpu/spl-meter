@@ -18,29 +18,14 @@ package uk.co.cinema.splmeter.data
  * The convention is standard and not a matter of taste: REW's documentation
  * says the file holds "the actual gain response of the meter or microphone …
  * which will then be subtracted from subsequent measurements". A mic that reads
- * high somewhere carries a positive value there. See [legacyInvertedCurve] for
- * the one exception this app has to cope with.
+ * high somewhere carries a positive value there, and that is the only
+ * convention this app understands.
  */
 class CalFile(
     val name: String,
     val sensFactor: Double?,
     val freqs: DoubleArray,
-    val corrections: DoubleArray,
-    /**
-     * True for files written by the old calibrate_phone.py, whose curve is
-     * sign-inverted relative to the standard.
-     *
-     * The format is standard and so is the convention: REW's documentation says
-     * a cal file holds "the actual gain response of the meter or microphone …
-     * which will then be subtracted from subsequent measurements", so a mic that
-     * reads high somewhere carries a positive value there. The old script wrote
-     * reference-minus-phone, the negative of that. Measuring a phone against a
-     * reference mic showed it reading +20.7 dB high at 7-8 kHz while the file
-     * that script produced said -21, which is what gave the game away.
-     *
-     * Detected from the header so existing files keep working unchanged.
-     */
-    val legacyInvertedCurve: Boolean = false
+    val corrections: DoubleArray
 ) {
     val hasCurve: Boolean get() = freqs.size >= 2
 
@@ -63,16 +48,14 @@ class CalFile(
         return corrections[lo] + t * (corrections[hi] - corrections[lo])
     }
 
-    /** dB to add to a measured band level at [hz], honouring the convention. */
-    fun bandCorrection(hz: Double): Double =
-        if (!hasCurve) 0.0 else (if (legacyInvertedCurve) 1.0 else -1.0) * correctionAt(hz)
+    /** dB to add to a measured band level at [hz]: the response, subtracted. */
+    fun bandCorrection(hz: Double): Double = if (!hasCurve) 0.0 else -correctionAt(hz)
 
     fun summary(): String = buildString {
         append(if (sensFactor != null) "Sens %.2f dB · offset %.2f dB".format(sensFactor, splOffset) else "no Sens Factor")
         if (hasCurve) {
             append(" · %d points, %.0f–%.0f Hz".format(freqs.size, freqs.first(), freqs.last()))
             append(" · %+.1f to %+.1f dB".format(corrections.min(), corrections.max()))
-            if (legacyInvertedCurve) append(" · legacy inverted sign")
         } else {
             append(" · no response curve")
         }
@@ -81,11 +64,7 @@ class CalFile(
     companion object {
         val NONE = CalFile("None (uncalibrated)", null, DoubleArray(0), DoubleArray(0))
 
-        /** Header written by calibrate_phone.py before the sign was corrected. */
-        private const val LEGACY_MARKER = "Phone calibrated against UMIK-1"
-
         fun parse(name: String, text: String): CalFile {
-            val legacy = text.lineSequence().take(4).any { it.contains(LEGACY_MARKER) }
             var sens: Double? = null
             val f = ArrayList<Double>()
             val c = ArrayList<Double>()
@@ -110,8 +89,7 @@ class CalFile(
                 name = name,
                 sensFactor = sens,
                 freqs = DoubleArray(order.size) { f[order[it]] },
-                corrections = DoubleArray(order.size) { c[order[it]] },
-                legacyInvertedCurve = legacy
+                corrections = DoubleArray(order.size) { c[order[it]] }
             )
         }
     }

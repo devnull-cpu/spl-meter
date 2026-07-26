@@ -180,8 +180,8 @@ def main():
     # frequency therefore gets a POSITIVE value there.
     #
     # This used to be written as ref - phone ("what to add to the phone"), which
-    # is the negative of the convention. Files generated before this fix are
-    # sign-inverted and are recognised by their old header line.
+    # is the negative of the convention. Any file produced by that older version
+    # must be negated before use; nothing detects it any more.
     response = phone_db - ref_db
 
     # Smooth the response curve

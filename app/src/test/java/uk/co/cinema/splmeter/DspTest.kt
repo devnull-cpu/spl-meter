@@ -117,26 +117,20 @@ class DspTest {
         assertEquals(-11.77, cal.sensFactor!!, 1e-9)
         assertEquals(135.77, cal.splOffset, 1e-9)
         assertEquals(3, cal.freqs.size)
-        assertTrue("a factory file must not be treated as legacy", !cal.legacyInvertedCurve)
         // Standard convention: a mic reading +2 dB high gets -2 dB applied.
         assertEquals(-2.0, cal.bandCorrection(8000.0), 1e-9)
     }
 
     @Test
-    fun `legacy phone file is detected and its sign flipped`() {
-        val legacy = "\"Sens Factor =-2.06dB, Phone calibrated against UMIK-1\"\n" +
-            "8000.000\t-21.0000\n1000.000\t0.0000\n"
-        val v1 = CalFile.parse("phone_cal.txt", legacy)
-        assertTrue(v1.legacyInvertedCurve)
-
-        val standard = "\"Sens Factor =-2.06dB, Phone response measured against UMIK-1 (REW convention)\"\n" +
+    fun `a cal curve is the mic's own response, subtracted`() {
+        // There is one convention and the header does not change it: whatever
+        // wrote the file, a mic reading +21 dB high at 8 kHz gets -21 applied.
+        val text = "\"Sens Factor =-2.06dB, Phone response measured against a reference mic\"\n" +
             "8000.000\t21.0000\n1000.000\t0.0000\n"
-        val v2 = CalFile.parse("phone_cal_v2.txt", standard)
-        assertTrue(!v2.legacyInvertedCurve)
+        val cal = CalFile.parse("phone_cal.txt", text)
 
-        // The whole point: the two files must now apply identically.
-        assertEquals(v1.bandCorrection(8000.0), v2.bandCorrection(8000.0), 1e-9)
-        assertEquals(-21.0, v2.bandCorrection(8000.0), 1e-9)
+        assertEquals(-21.0, cal.bandCorrection(8000.0), 1e-9)
+        assertEquals(0.0, cal.bandCorrection(1000.0), 1e-9)
     }
 
     @Test
