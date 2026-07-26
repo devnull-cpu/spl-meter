@@ -100,7 +100,22 @@ the response half needs a measurement microphone:
   enter what it read. Entering both a dBA and a dBC reading also gives an
   accuracy estimate, since a disagreement between them means the response is not
   flat where A and C weight the signal differently.
-- **Response** needs a measurement mic and pink noise, via `calibrate_phone.py`.
+- **Response** needs a measurement mic and pink noise, via
+  [`tools/calibrate_phone.py`](tools/calibrate_phone.py):
+
+  ```
+  python tools/calibrate_phone.py --ref reference.wav --phone phone.wav       --cal-file reference_mic.txt --output phone_cal.txt
+  ```
+
+  Play pink noise, record it on the phone and on the measurement mic at the
+  same time with the capsules close together, then import the result. Needs
+  numpy and soundfile.
+
+  Any individually calibrated measurement mic works, and it need not be an
+  expensive one — a Dayton Audio iMM-6 or iMM-6C costs roughly a third of a
+  miniDSP UMIK-1 and ships with its own serialised calibration file, which is
+  what the script needs. Calibration is also a one-off per phone, so borrowing
+  a mic for ten minutes is enough.
 
 Calibration belongs to the session, not the app. Each session chooses its own —
 an embedded copy saved when it was recorded, a named file from the library, or
