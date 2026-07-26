@@ -203,8 +203,15 @@ cannot leave the device even in principle. The permissions it does declare:
 | --- | --- |
 | `RECORD_AUDIO` | measuring sound |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE` | keep measuring with the screen off |
-| `POST_NOTIFICATIONS` | the ongoing notification showing the live level |
+| `POST_NOTIFICATIONS` | show the ongoing notification while measuring |
 | `WAKE_LOCK` | stop the CPU sleeping mid-session |
+
+The notification permission is worth a word, because it sounds more invasive
+than it is. Android's rule for background work is that an app may keep running
+only while it displays an ongoing notification, so the user can see it and stop
+it. Granting this is what lets that notice appear — it makes microphone use
+visible rather than hiding it. Recording still works if you deny it; you just
+lose the live reading and the stop button in the notification shade.
 
 Check for yourself, against the APK you downloaded:
 
@@ -224,6 +231,8 @@ repository and this workflow:
 ```
 gh attestation verify app-release.apk --repo devnull-cpu/spl-meter
 ```
+
+(needs GitHub CLI 2.49 or newer)
 
 Each release also publishes the APK's SHA-256, and the signing certificate can be
 inspected with:
