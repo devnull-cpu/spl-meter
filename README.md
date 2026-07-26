@@ -1,7 +1,8 @@
 # SPL Meter
 
 An Android sound level meter that measures calibrated SPL in real time, keeps a
-compact spectral log of the whole session, and generates an HTML report.
+compact spectral log of the whole session, and generates a report as a web page
+or a single image.
 
 Built for measuring loud environments over long periods — the sort of
 measurement a handheld meter gives you a single number for, where you actually
@@ -39,7 +40,10 @@ and every past session updates with it.
 
 - Captures from `AudioSource.UNPROCESSED` — no AGC, noise suppression or echo
   cancellation, all of which would wreck an SPL measurement. Falls back to
-  `VOICE_RECOGNITION` then `MIC`, and the source used is recorded per session.
+  `VOICE_RECOGNITION` then `MIC`. Each session records the source, the phone,
+  and the physical microphone the device resolved the request to — a
+  calibration is only valid for one of them, and what was asked for is not
+  necessarily what the audio HAL chose.
 - Stereo capture keeping one selectable channel, so the mic being measured is
   the mic the calibration was made on. Requesting mono instead lets the audio
   HAL pick or mix microphones. Which channel corresponds to which physical mic
@@ -128,7 +132,7 @@ never silently reinterprets past measurements.
 | --- | --- |
 | Record | Live dBA/dBC/dBZ, running Leq, level bar against a reference, scrolling history |
 | History | Past sessions with summary metrics |
-| Report | Full HTML analysis; re-analyse a time range, change calibration, share, export CSV |
+| Report | Full analysis; re-analyse a time range, change calibration, share as a web page or PNG, export CSV |
 | Cal | Import cal files, or set the level against a sound level meter |
 | Settings | Source, channel layout, band limit, DC removal, declick, declip, window length, display rate |
 
@@ -143,7 +147,7 @@ Android/data/<applicationId>/files/sessions/<yyyy-MM-dd_HH-mm-ss>/
     spectrum.splog    binary spectral log
     calibration.txt   copy of the calibration in force at the time
     audio.wav         only if raw audio was enabled
-    report.html       generated on demand
+    report.html       generated on demand, alongside PNG and CSV exports
 ```
 
 ### `.splog` format
@@ -157,6 +161,10 @@ Each record: `tSec`, `LAeq`, `LCeq`, `LZeq`, `Lpeak`, `LASmax`, `LASmin`,
 (ints), then the sub bins and third-octave bands as floats. Every value is dB
 relative to full scale. Records are flushed as written, so a session cut short
 by a flat battery still yields everything up to that point.
+
+The session summary in `meta.json` is checkpointed while recording and replaced
+atomically, so an interrupted session is described as well as stored; if it is
+missing or stale it is rebuilt from the log, which is the authoritative copy.
 
 ## Validation
 
