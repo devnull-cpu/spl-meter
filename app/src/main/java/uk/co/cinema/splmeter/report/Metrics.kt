@@ -65,7 +65,10 @@ class Metrics private constructor(
             val splC = FloatArray(n)
             val splZ = FloatArray(n)
             var aSum = 0.0; var cSum = 0.0; var zSum = 0.0
-            var aSumRaw = 0.0
+            // The same sums without the response curve, so its average effect
+            // can be measured. A and C need their own: the curve lands on a
+            // different part of the spectrum from each.
+            var aSumRaw = 0.0; var cSumRaw = 0.0
 
             // Full third-octave set, 20 Hz .. 20 kHz: low bands integrated out
             // of the 1 Hz sub bins, high bands taken from the stored bands.
@@ -113,7 +116,7 @@ class Metrics private constructor(
                 val third = log.third[w]
 
                 var aP = 0.0; var cP = 0.0; var zP = 0.0
-                var aPRaw = 0.0
+                var aPRaw = 0.0; var cPRaw = 0.0
                 for (i in sub.indices) {
                     val hz = log.subHz(i)
                     val p = 10.0.pow(sub[i] / 10.0)
@@ -124,6 +127,7 @@ class Metrics private constructor(
                     aP += pc * 10.0.pow(Weighting.aWeightDb(hz) / 10.0)
                     cP += pc * 10.0.pow(Weighting.cWeightDb(hz) / 10.0)
                     aPRaw += p * 10.0.pow(Weighting.aWeightDb(hz) / 10.0)
+                    cPRaw += p * 10.0.pow(Weighting.cWeightDb(hz) / 10.0)
                 }
                 for (i in third.indices) {
                     val hz = log.header.thirdCentres[i]
@@ -133,6 +137,7 @@ class Metrics private constructor(
                     aP += pc * 10.0.pow(Weighting.aWeightDb(hz) / 10.0)
                     cP += pc * 10.0.pow(Weighting.cWeightDb(hz) / 10.0)
                     aPRaw += p * 10.0.pow(Weighting.aWeightDb(hz) / 10.0)
+                    cPRaw += p * 10.0.pow(Weighting.cWeightDb(hz) / 10.0)
                 }
 
                 // Band-resolved third-octave spectrum for the charts.
@@ -165,13 +170,19 @@ class Metrics private constructor(
                     zSum += 10.0.pow(log.lzeq[w] / 10.0)
                 }
                 aSumRaw += aPRaw
+                cSumRaw += cPRaw
             }
 
             // Fast time-weighted extremes were computed live without the response
             // curve. Shift them by the session-average effect of the curve so the
-            // LAS/LCS cards stay consistent with everything else.
-            val fastShift = if (useBands && n > 0 && aSumRaw > 0.0)
+            // LAS/LCS cards stay consistent with everything else. A and C get
+            // their own shift: a curve that cuts 6-8 kHz moves the A levels by
+            // several dB and the C levels, which the bass sets, by almost
+            // nothing, so one shared shift drags LCS badly off.
+            val aShift = if (useBands && n > 0 && aSumRaw > 0.0)
                 10.0 * log10(aSum / aSumRaw) else 0.0
+            val cShift = if (useBands && n > 0 && cSumRaw > 0.0)
+                10.0 * log10(cSum / cSumRaw) else 0.0
 
             val safeN = maxOf(n, 1)
             val thirdAvg = DoubleArray(centres.size) {
@@ -195,10 +206,10 @@ class Metrics private constructor(
                 leqZ = if (n == 0) -200.0 else 10.0 * log10(zSum / safeN) + offset,
                 // NaN marks a window with no usable level; ignore those rather
                 // than letting one pin an extreme for the whole session.
-                lasMax = extreme(log.lasMax, true) + offset + fastShift,
-                lasMin = extreme(log.lasMin, false) + offset + fastShift,
-                lcsMax = extreme(log.lcsMax, true) + offset + fastShift,
-                lcsMin = extreme(log.lcsMin, false) + offset + fastShift,
+                lasMax = extreme(log.lasMax, true) + offset + aShift,
+                lasMin = extreme(log.lasMin, false) + offset + aShift,
+                lcsMax = extreme(log.lcsMax, true) + offset + cShift,
+                lcsMin = extreme(log.lcsMin, false) + offset + cShift,
                 lzPeak = peaks.firstOrNull()?.db ?: -200.0,
                 lzPeakTime = peaks.firstOrNull()?.timeSec ?: 0.0,
                 thirdCentres = centres,

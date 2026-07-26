@@ -7,10 +7,13 @@ import uk.co.cinema.splmeter.data.Calibration
 import uk.co.cinema.splmeter.data.SpectralLog
 import uk.co.cinema.splmeter.data.WavWriter
 import uk.co.cinema.splmeter.dsp.Bands
+import uk.co.cinema.splmeter.dsp.Weighting
 import uk.co.cinema.splmeter.report.Metrics
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.log10
+import kotlin.math.pow
 import org.junit.Test
 
 /**
@@ -80,6 +83,50 @@ class BandOverlapTest {
 
         val m = Metrics.compute(oneWindowLog(sub, third), flatCal())
         assertEquals(0.0, m.leqZ, 0.01)
+    }
+
+    /**
+     * The Fast extremes are shifted by the session-average effect of the
+     * response curve rather than recomputed. A and C must get their own shift:
+     * a curve that cuts the top end moves A a long way and C barely at all.
+     */
+    @Test
+    fun theCurveShiftsTheAAndCExtremesSeparately() {
+        val sub = FloatArray(Bands.SUB_COUNT) { -200f }
+        val third = FloatArray(Bands.THIRD_OCTAVE_STORED.size) { -200f }
+        sub[63 - Bands.SUB_LOW_HZ] = 0f                                  // bass
+        third[Bands.THIRD_OCTAVE_STORED.indexOfFirst { it == 8000.0 }] = 0f // treble
+
+        // A mic reading 20 dB high at 8 kHz and flat below 1 kHz, so the
+        // correction is a 20 dB cut up there and nothing down here.
+        val cal = Calibration(
+            splOffset = 0.0,
+            cal = CalFile(
+                "top cut", 0.0,
+                doubleArrayOf(10.0, 1000.0, 8000.0, 24000.0),
+                doubleArrayOf(0.0, 0.0, 20.0, 20.0)
+            ),
+            name = "top cut"
+        )
+
+        val log = oneWindowLog(sub, third).also {
+            it.lasMax[0] = 0f; it.lasMin[0] = 0f
+            it.lcsMax[0] = 0f; it.lcsMin[0] = 0f
+        }
+        val m = Metrics.compute(log, cal)
+
+        fun shift(weight: (Double) -> Double): Double {
+            val bass = 10.0.pow(weight(63.0) / 10.0)
+            val treble = 10.0.pow(weight(8000.0) / 10.0)
+            return 10.0 * log10((bass + treble * 0.01) / (bass + treble))
+        }
+        assertEquals(shift(Weighting::aWeightDb), m.lasMax, 0.01)
+        assertEquals(shift(Weighting::cWeightDb), m.lcsMax, 0.01)
+        // The whole point: one shared shift would make these equal.
+        assertTrue(
+            "C should barely move where A moves a long way",
+            m.lcsMax - m.lasMax > 10.0
+        )
     }
 
     /** The RIFF size fields sit at bytes 4 and 40 and describe the right lengths. */

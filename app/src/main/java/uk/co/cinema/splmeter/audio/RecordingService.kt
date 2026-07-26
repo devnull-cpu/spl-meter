@@ -73,6 +73,18 @@ class RecordingService : Service() {
 
     private var captureThread: Thread? = null
     @Volatile private var running = false
+    /**
+     * Which session the shared state belongs to, incremented on every start.
+     *
+     * Stopping is asynchronous — the last queued windows still have to be
+     * analysed — so a start can arrive while the previous session is still
+     * draining. Without a generation, the new start flips [running] back to
+     * true, the old analysis loop never reaches its exit condition, and it
+     * carries on consuming the new session's windows into the old session's
+     * log. Every loop checks that the generation is still its own, so an
+     * outgoing session can only ever end itself.
+     */
+    @Volatile private var generation = 0
     private var wakeLock: PowerManager.WakeLock? = null
     private val processor = Executors.newSingleThreadExecutor()
 
@@ -84,8 +96,6 @@ class RecordingService : Service() {
      * truthful even if a buffer is ever dropped under load.
      */
     private class PendingWindow(val samples: FloatArray, val startSample: Long)
-
-    private val pending = LinkedBlockingQueue<PendingWindow>(8)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -124,8 +134,8 @@ class RecordingService : Service() {
             .also { it.setReferenceCounted(false); it.acquire() }
 
         running = true
-        frameOffsetBaseline = Long.MIN_VALUE
-        captureThread = Thread({ captureLoop(title) }, "capture").apply {
+        val gen = ++generation
+        captureThread = Thread({ captureLoop(title, gen) }, "capture").apply {
             priority = Thread.MAX_PRIORITY
             start()
         }
@@ -150,12 +160,18 @@ class RecordingService : Service() {
 
     // ------------------------------------------------------------------
 
-    private fun captureLoop(title: String) {
+    private fun captureLoop(title: String, gen: Int) {
         val settings = Prefs.state.value
         val calibration = Prefs.activeCalibration()
         val windowSamples = (SAMPLE_RATE * settings.windowSeconds).toInt()
         val startedAt = Date()
         val id = SessionStore.newId(startedAt)
+
+        // Owned by this session alone: a queue shared between sessions lets an
+        // outgoing analysis loop swallow the incoming session's windows.
+        val pending = LinkedBlockingQueue<PendingWindow>(8)
+        // True while this session is the current one and has not been stopped.
+        fun live() = running && generation == gen
 
         var record: AudioRecord? = null
         var wav: WavWriter? = null
@@ -212,15 +228,28 @@ class RecordingService : Service() {
                 while (true) {
                     val buf = pending.poll(500, TimeUnit.MILLISECONDS)
                     if (buf == null) {
-                        if (!running && pending.isEmpty()) break else continue
+                        if (!live() && pending.isEmpty()) break else continue
                     }
-                    val repair = Repair.repair(buf.samples, settings.declick, settings.declip)
-                    val t = buf.startSample.toDouble() / SAMPLE_RATE
-                    val result = analyzer.analyze(buf.samples, t.toFloat(), repair)
-                    stats.accumulate(result)
-                    logWriter.append(result)
-                    Recorder.onWindow(result, calibration.splOffset, t + windowSamples.toDouble() / SAMPLE_RATE)
-                    updateNotification(result, calibration.splOffset)
+                    try {
+                        val repair = Repair.repair(buf.samples, settings.declick, settings.declip)
+                        val t = buf.startSample.toDouble() / SAMPLE_RATE
+                        val result = analyzer.analyze(buf.samples, t.toFloat(), repair)
+                        stats.accumulate(result)
+                        logWriter.append(result)
+                        Recorder.onWindow(result, calibration.splOffset, t + windowSamples.toDouble() / SAMPLE_RATE)
+                        updateNotification(result, calibration.splOffset)
+                    } catch (e: Throwable) {
+                        // Without this the task dies inside the executor, which
+                        // swallows the throw: capture would carry on filling a
+                        // queue nobody reads, the display would freeze on the
+                        // last good window, and the recording would look live
+                        // for the rest of the session. Storage filling mid-
+                        // recording is the realistic way to get here. End the
+                        // session instead, and say why.
+                        Log.e(TAG, "analysis failed", e)
+                        stats.analysisFailure = e.message ?: e.javaClass.simpleName
+                        break
+                    }
                 }
             }
 
@@ -245,7 +274,7 @@ class RecordingService : Service() {
             val displayIntervalMs = (settings.displaySeconds * 1000).toLong()
             var lastDisplay = 0L
 
-            while (running) {
+            while (live() && stats.analysisFailure == null) {
                 val read = record.read(interleaved, 0, interleaved.size)
                 if (read <= 0) {
                     if (read == AudioRecord.ERROR_INVALID_OPERATION || read == AudioRecord.ERROR_BAD_VALUE) {
@@ -296,7 +325,11 @@ class RecordingService : Service() {
                 checkForMissedFrames(record, totalSamples, stats)
             }
 
-            processor.submit { }.get(10, TimeUnit.SECONDS)
+            // Wait for our own analysis task to drain. If a newer session has
+            // already taken over the executor this can time out through no
+            // fault of ours, so it must not be allowed to fail that session.
+            runCatching { processor.submit { }.get(10, TimeUnit.SECONDS) }
+                .onFailure { Log.w(TAG, "analysis drain did not complete", it) }
 
             val (leqA, leqC, leqZ) = Recorder.summary()
             SessionStore.save(
@@ -319,12 +352,18 @@ class RecordingService : Service() {
                     lzPeak = stats.lzPeak
                 )
             )
-            Recorder.finish()
+            // The session is saved either way; a mid-recording analysis failure
+            // means it is short, not that it is worthless.
+            val failure = stats.analysisFailure
+            if (generation != gen) Unit
+            else if (failure != null) Recorder.fail("Analysis stopped: $failure")
+            else Recorder.finish()
         } catch (e: Throwable) {
             Log.e(TAG, "capture failed", e)
-            Recorder.fail(e.message ?: e.javaClass.simpleName)
+            if (generation == gen) Recorder.fail(e.message ?: e.javaClass.simpleName)
         } finally {
-            running = false
+            // Only ever end our own session: a newer one may be running.
+            if (generation == gen) running = false
             runCatching { record?.stop() }
             runCatching { record?.release() }
             runCatching { writer?.close() }
@@ -339,6 +378,13 @@ class RecordingService : Service() {
         @Volatile var droppedWindows = 0
         /** Frames the driver captured but we never read. Should stay 0. */
         @Volatile var missedFrames = 0L
+        /** Set by the analysis thread if it had to give up. Null while healthy. */
+        @Volatile var analysisFailure: String? = null
+        /**
+         * Startup offset between the driver's frame counter and ours, per
+         * session — the driver begins filling before the first read returns.
+         */
+        var frameOffsetBaseline = Long.MIN_VALUE
         var lasMax = Float.NaN
         var lasMin = Float.NaN
         var lcsMax = Float.NaN
@@ -362,13 +408,6 @@ class RecordingService : Service() {
     }
 
     private var lastFrameCheck = 0L
-    /**
-     * Offset between the driver's frame counter and ours at the start of a
-     * capture, which is buffer priming rather than lost audio: the hardware
-     * begins filling before the first read returns. Only growth beyond this
-     * baseline means samples actually went missing.
-     */
-    private var frameOffsetBaseline = Long.MIN_VALUE
 
     /**
      * Compares the driver's own frame counter against how many frames we have
@@ -390,17 +429,17 @@ class RecordingService : Service() {
             val ts = AudioTimestamp()
             if (record.getTimestamp(ts, AudioTimestamp.TIMEBASE_MONOTONIC) != AudioRecord.SUCCESS) return
             val offset = ts.framePosition - framesRead
-            if (frameOffsetBaseline == Long.MIN_VALUE) {
-                frameOffsetBaseline = offset
+            if (stats.frameOffsetBaseline == Long.MIN_VALUE) {
+                stats.frameOffsetBaseline = offset
                 Log.i(TAG, "capture frame offset baseline: $offset frames")
                 return
             }
-            val missed = offset - frameOffsetBaseline
+            val missed = offset - stats.frameOffsetBaseline
             // A frame or two of slop is just where the timestamp was sampled.
             if (missed > SAMPLE_RATE / 100 && missed > stats.missedFrames) {
                 stats.missedFrames = missed
                 Log.w(TAG, "capture gap: driver at ${ts.framePosition}, read $framesRead, " +
-                    "$missed frames beyond the startup baseline of $frameOffsetBaseline")
+                    "$missed frames beyond the startup baseline of ${stats.frameOffsetBaseline}")
             }
         }
     }
