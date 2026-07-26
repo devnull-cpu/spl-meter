@@ -58,6 +58,7 @@ import uk.co.cinema.splmeter.data.SessionStore
 import uk.co.cinema.splmeter.data.SpectralLog
 import uk.co.cinema.splmeter.report.CsvExport
 import uk.co.cinema.splmeter.report.Metrics
+import uk.co.cinema.splmeter.report.ReportImage
 import uk.co.cinema.splmeter.report.ReportGenerator
 import java.io.File
 
@@ -74,6 +75,7 @@ fun ReportScreen(sessionId: String, onBack: () -> Unit) {
     var metrics by remember { mutableStateOf<Metrics?>(null) }
     var failure by remember { mutableStateOf<String?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
+    var shareOpen by remember { mutableStateOf(false) }
 
     var meta by remember(sessionId) { mutableStateOf(SessionStore.load(sessionId)) }
     val fullDuration = (meta?.durationSec ?: 0.0).toFloat()
@@ -213,9 +215,35 @@ fun ReportScreen(sessionId: String, onBack: () -> Unit) {
                 },
                 actions = {
                     IconButton(
-                        onClick = { reportFile?.let { Share.file(context, it, "text/html", "SPL report") } },
+                        onClick = { shareOpen = true },
                         enabled = reportFile != null
                     ) { Icon(Icons.Default.Share, contentDescription = "Share report") }
+                    DropdownMenu(expanded = shareOpen, onDismissRequest = { shareOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Web page (HTML)") },
+                            onClick = {
+                                shareOpen = false
+                                reportFile?.let { Share.file(context, it, "text/html", "SPL report") }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Image (PNG)") },
+                            onClick = {
+                                shareOpen = false
+                                val m = metrics
+                                val md = meta
+                                if (m != null && md != null) scope.launch {
+                                    val f = withContext(Dispatchers.IO) {
+                                        ReportImage.write(
+                                            md, m,
+                                            File(SessionStore.dir(sessionId), "${sessionId}_report.png")
+                                        )
+                                    }
+                                    Share.file(context, f, "image/png", "SPL report")
+                                }
+                            }
+                        )
+                    }
 
                     IconButton(onClick = { trimPanelOpen = !trimPanelOpen }) {
                         Icon(Icons.Default.ContentCut, contentDescription = "Trim")
