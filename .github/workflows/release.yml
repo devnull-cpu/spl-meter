@@ -1,0 +1,67 @@
+name: release
+
+# Tag a version to publish a signed APK:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Requires four repository secrets. Generate the keystore once and keep it
+# safe — losing it means never being able to update the app under the same
+# identity:
+#
+#   keytool -genkeypair -v -keystore release.jks -keyalg RSA -keysize 4096 \
+#           -validity 10000 -alias release
+#   base64 -w0 release.jks        # -> KEYSTORE_BASE64
+#
+#   KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew test --no-daemon
+
+      - name: Restore keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+          cat > keystore.properties <<EOF
+          storeFile=$(pwd)/release.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - name: Assemble release
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f release.jks keystore.properties
+
+      - name: Attach APK to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/app-release.apk
+          generate_release_notes: true

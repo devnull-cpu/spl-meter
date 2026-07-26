@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+
+# Signing material must never be committed. Losing the keystore means never
+# being able to update the app on Play under the same identity.
+keystore.properties
+*.jks
+*.keystore
