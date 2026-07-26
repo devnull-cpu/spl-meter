@@ -79,6 +79,16 @@ class Metrics private constructor(
             val storedIndex = IntArray(centres.size) { b ->
                 log.header.thirdCentres.indexOfFirst { abs(it - centres[b]) < 0.01 }
             }
+            // The 1 Hz sub bins run to 300 Hz but the lowest stored 1/3 octave
+            // band is 315 Hz, whose lower edge is 280.6 Hz — so the two sets
+            // overlap. Summing both wholesale counts that slice twice; for pink
+            // content it is about 0.9% of the total, or 0.04 dB on Leq(Z). The
+            // stored band covers the slice already, so the sub bins stop at its
+            // lower edge. Only the broadband sums are trimmed: the sub spectrum
+            // chart still wants every bin.
+            val bandsFrom = log.header.thirdCentres.minOrNull()
+                ?.let { Bands.lowEdge(it) } ?: Double.MAX_VALUE
+
             val subFrom = IntArray(centres.size)
             val subTo = IntArray(centres.size)
             for (b in centres.indices) {
@@ -109,6 +119,7 @@ class Metrics private constructor(
                     val p = 10.0.pow(sub[i] / 10.0)
                     val pc = p * subCorr[i]
                     subPowerSum[i] += pc
+                    if (hz >= bandsFrom) continue // already inside a stored band
                     zP += pc
                     aP += pc * 10.0.pow(Weighting.aWeightDb(hz) / 10.0)
                     cP += pc * 10.0.pow(Weighting.cWeightDb(hz) / 10.0)
