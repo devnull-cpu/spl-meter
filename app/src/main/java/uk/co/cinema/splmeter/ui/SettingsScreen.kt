@@ -194,16 +194,17 @@ fun SettingsScreen() {
 
         Section("Calibration") {
             SwitchRow(
-                "Apply response curve",
-                "Default for new analysis. Each recording can override this on its report.",
+                "Use response curves by default",
+                "Correct each band by the mic response in the cal file, as well as the level. " +
+                    "Off measures with the Sens Factor only. Each recording can override this " +
+                    "on its report.",
                 s.applyCalCurve, enabled = true
             ) { Prefs.setApplyCalCurve(it) }
 
             Spacer(Modifier.height(12.dp))
             Text(
-                "Cal files follow the REW convention: the file holds the mic's response and it " +
-                    "is subtracted. Older calibrate_phone.py files are inverted and detected " +
-                    "automatically.",
+                "Cal files follow the REW convention: the file holds the mic's own response, " +
+                    "positive where the mic reads high, and it is subtracted.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
